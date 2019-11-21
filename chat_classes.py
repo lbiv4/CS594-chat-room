@@ -3,7 +3,9 @@ class User:
     def __init__(self, name, password):
         self.name = name
         self.password = password
-        self.active = True
+        self.active = False
+        self.room = None
+        self.protocol = None
 
 
 class MessageChain:
@@ -18,16 +20,23 @@ class MessageChain:
         else:
             return self.messages[(len(self.messages)-numOfRecent):]
 
+    def getFormattedMessages(self, numOfRecent):
+        formattedMessages = []
+        for msg in self.getMessages(numOfRecent):
+            output = "[{}]({}:) {}".format(msg.time, msg.sender, msg.text)
+            formattedMessages.append(output)
+        return formattedMessages
+
     def addMessage(self, message):
         if message:
             self.messages.push(message)
 
     def addUser(self, user):
-        if not name in self.users:
-            self.users.push(user)
+        if not user in self.users:
+            self.users.append(user)
 
     def removeUser(self, user):
-        if name in self.users:
+        if user in self.users:
             self.users.remove(user)
 
 
