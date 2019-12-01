@@ -6,27 +6,17 @@ https://twistedmatrix.com/documents/current/api/twisted.protocols.basic.LineRece
 
 """
 
-"""
-States:
-LOGGED_OUT
-LOGGED_IN
-IN_ROOM
-IN_IM
-"""
-
 
 
 
 from twisted.internet import reactor, protocol
 from twisted.words.protocols.irc import IRC
 from twisted.internet.protocol import Factory
+import threading
 from chat_classes import *
 class ChatServer(IRC):
     def __init__(self, users, messageChains):
-        self.states = ["LOGGED_OUT",
-                       "LOGGED_IN"
-                       "IN_ROOM",
-                       "IN_IM"]
+        self.states = CHAT_STATES
         self.users = users
         self.messageChains = messageChains
         self.user = None
@@ -35,7 +25,9 @@ class ChatServer(IRC):
     def connectionMade(self):
         print("Connected to a user")
         #print(self. users, self.state)
-        self.sendLine("Test")
+        self.sendLine("Welcome!")
+        for i in range(5):
+            threading.Timer(5.0*(i+1), lambda: self.sendLine("Test")).start()
 
     def connectionLost(self, reason):
         print("Disconnected from a user")
@@ -53,7 +45,7 @@ class ChatServer(IRC):
 
     def dataReceived(self, data):
         print("Received: {}".format(data))
-        # self.sendLine("Returned")
+        self.sendLine("Returned")
         (command, prefix, params) = self.parsemsg(data)
         self.handleCommand(command, prefix, params)
 

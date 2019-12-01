@@ -1,3 +1,8 @@
+CHAT_STATES = ["LOGGED_OUT",
+               "LOGGED_IN"
+               "IN_ROOM",
+               "IN_IM"]
+
 
 class User:
     def __init__(self, name, password):
