@@ -28,7 +28,7 @@ class ChatClient(irc.IRCClient):
         print("connection made")
 
     def connectionLost(self, reason):
-        print("connection lost")
+        print("connection with server lost - closing application")
 
     def lineReceived(self, line):
         # Ignore blank lines
@@ -49,43 +49,31 @@ class ChatClient(irc.IRCClient):
 
     def _pollInput(self):
         self.readingInput = True
-        #d = raw_input("Try this:")
-        self.currentInput = ""
-        while True:
-            char = sys.stdin.read(1)
-            if char == "\n":
-                break
-            self.currentInput = self.currentInput + char
-        self.currentInput = self.currentInput.strip()
-        if len(self.currentInput) > 0:
-            self.sendLine(self.currentInput)
-        self.currentInput = ""
-        #print(">> ")
-        #print("raw: {}".format(d))
-        #print("Test: {}".format(output))
-        # self.sendLine(d)
+        d = raw_input(">> ")
+        self.sendLine(d)
         self.readingInput = False
 
     def _printMessage(self, data):
-        print("curr: ".format(self.currentInput))
-        charDiff = len(self.currentInput) - len(data)
-        overwrite = charDiff+4 if charDiff > 0 else 4
-        line = ">> {}{}\n".format(data, _getRepeatedChar(" ", overwrite))
-        sys.stdout.write("\033[F"+line)
-        sys.stdout.flush()
-        sys.stdout.write(">> '"+self.currentInput+"'")
+        data = data.strip()
+        if self.readingInput:
+            print("\n{}".format(data))
+        else:
+            print("{}".format(data))
 
 
 class ChatClientFactory(protocol.ClientFactory):
     protocol = ChatClient
 
     def clientConnectionFailed(self, connector, reason):
-        # print("Connection failed - goodbye!")
-        reactor.stop()
+        print("Connection failed - goodbye!")
+        if reactor.running:
+            reactor.stop()
 
     def clientConnectionLost(self, connector, reason):
-        # print("Connection lost - goodbye!")
-        reactor.stop()
+        print("Connection lost - goodbye!")
+        if reactor.running:
+            reactor.stop()
+        """https://www.geeksforgeeks.org/python-different-ways-to-kill-a-thread/"""
 
 
 # def main():

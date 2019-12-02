@@ -28,8 +28,7 @@ class MessageChain:
     def getFormattedMessages(self, numOfRecent):
         formattedMessages = []
         for msg in self.getMessages(numOfRecent):
-            output = "[{}]({}:) {}".format(msg.time, msg.sender, msg.text)
-            formattedMessages.append(output)
+            formattedMessages.append(msg.getFormatted())
         return formattedMessages
 
     def addMessage(self, message):
@@ -52,4 +51,4 @@ class Message:
         self.text = text
 
     def getFormatted(self):
-        return "[{}]<{}>: {}".format(time, sender, text)
+        return "[{}]<{}>: {}".format(self.time.strftime("%m/%d/%Y@%H:%M:%S"), self.sender, self.text)
