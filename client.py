@@ -5,47 +5,46 @@ import sys
 import subprocess
 from chat_classes import *
 
-
-def _getRepeatedChar(char, count):
-    output = ""
-    for i in range(count):
-        output += char
-    return output
-
-
 # a client protocol
+
 
 class ChatClient(irc.IRCClient):
     delimiter = "\n"
 
     def __init__(self):
-        self.states = CHAT_STATES
+        self.prefix = "!"
         self.readingInput = False
         self.currentInput = ""
         self.writingOutput = False
 
     def connectionMade(self):
         print("connection made")
+        self.sendLine("!open Open plz")
 
     def connectionLost(self, reason):
         print("connection with server lost - closing application")
 
-    def lineReceived(self, line):
-        # Ignore blank lines
-        if not line:
-            return
-        line = line.decode("ascii")
-        # print("Line: {}".format(line))
-
     def dataReceived(self, data):
-        # print("here: {}".format(data))
-        # print(self.transport)
-        # print(self.serverTransport)
-        # print("transports ^^^^^")
-        self._printMessage(data)
-        if not self.readingInput:
-            input = threading.Thread(target=self._pollInput)
-            input.start()
+        (command, prefix, content) = self.parsemsg(data)
+        # Check prefix matches server
+        if command == "open" and prefix == "":
+            self.prefix = data[0]
+            self.sendLine("{}open Retying prefix".format(self.prefix))
+        else:
+            self._printMessage(data)
+            if not self.readingInput:
+                input = threading.Thread(target=self._pollInput)
+                input.setDaemon(True)
+                input.start()
+
+    def parsemsg(self, input):
+        if not input:
+            return("", "unknown")
+        prefix = self.prefix if input[0] == self.prefix else ""
+        words = input.split()
+        command = words[0].replace(prefix, "").lower()
+        print("Parse: {} / {} / {}".format(command, prefix, words[1:]))
+        return (command, prefix, words[1:])
 
     def _pollInput(self):
         self.readingInput = True
@@ -73,7 +72,6 @@ class ChatClientFactory(protocol.ClientFactory):
         print("Connection lost - goodbye!")
         if reactor.running:
             reactor.stop()
-        """https://www.geeksforgeeks.org/python-different-ways-to-kill-a-thread/"""
 
 
 # def main():

@@ -16,171 +16,202 @@ import threading
 from datetime import datetime
 from chat_classes import *
 class ChatServer(IRC):
-    def __init__(self, users, messageChains):
-        self.states = CHAT_STATES
+    def __init__(self, expectedPrefix, users, messageChains):
+        self.prefix = expectedPrefix
         self.users = users
         self.messageChains = messageChains
         self.user = None
-        self.state = "LOGGED_OUT"
 
     def connectionMade(self):
-        print("Connected to a user")
-        # print(self. users, self.state)
-        self.sendLine("Welcome!")
+        print("Connected to a client")
 
     def connectionLost(self, reason):
-        if self.state == "LOGGED_OUT":
+        if not self.user or not self.user.active:
             print("Disconnected from a logged out client")
         else:
             print("Disconnected from user '{}'".format(self.user.name))
         self.logoutUser()
-        self.sendLine("Exited")
+        self.sendResponse("close", "Confirming close, goodbye!")
 
     def parsemsg(self, input):
-        print("parse input: {}".format(input))
         if not input:
             return("", "unknown")
-        prefix = "!" if input[0] == "!" else ""
+        prefix = self.prefix if input[0] == self.prefix else ""
         words = input.split()
         command = words[0].replace(prefix, "").lower()
-        print("Parse: {} / {} / {}".format(command, prefix, words[1:]))
         return (command, prefix, words[1:])
 
     def dataReceived(self, data):
-        print("Received: {}".format(data))
         (command, prefix, params) = self.parsemsg(data)
+        userInfo = self.user.name if self.user else "logged out client"
+        print("Content from {}: {} / {} / {}".format(userInfo,
+                                                     command, prefix, words[1:]))
         self.handleCommand(command, prefix, params)
 
     def handleCommand(self, command, prefix, params):
-        print("handle: {}, {}, {}".format(command, prefix, params))
         if not command:
             self.unknownCommand("")
-        elif prefix == "!":
-            if command == "login":
-                self.login(params)
-            elif command == "logout" or command == "quit" or command == "exit":
+        elif prefix == self.prefix:
+            if command == "open":
+                self.sendResponse(
+                    "open", "Welcome to the chat program! Use /login to get started")
+            elif command in ["close", "logout", "quit", "exit"]:
                 self.logout(params)
+            elif command == "login":
+                self.login(params)
             elif command == "create":
                 self.createRoom(params)
             elif command == "join":
                 self.joinRoom(params)
-            elif command == "im" or command == "dm" or command == "privmsg":
+            elif command == "im":
                 self.joinIM(params)
-            elif command == "msg" or command == "message":
+            elif command in ["msg", "message"]:
                 self.message(params)
             else:
                 self.unknownCommand(command)
         else:
-            self.sendLine("Need ! for command")
+            self.sendResponse(
+                "error", "Need {} for command prefix".format(self.prefix))
 
     # Protocols
 
     def unknownCommand(self, command):
-        self.sendLine("Unrecognized command '{}'".format(command))
+        self.sendResponse("error", "Unrecognized command '{}'".format(command))
 
     def login(self, args):
-        if self.state != "LOGGED_OUT":
-            self.sendLine(
-                "Already logged in - see /help for valid commands")
+        if self.userLoggedIn():
+            self.sendResponse("error",
+                              "Already logged in - see /help for valid commands")
         elif len(args) < 2:
-            self.sendLine(
-                "Please enter a username and password, e.g. !login <username> <password>")
+            self.sendResponse("error",
+                              "Please enter a username and password, e.g. !login <username> <password>")
         else:
             name = args[0]
             password = args[1]
             if name in self.users:
                 if self.users[name].active:
-                    self.sendLine(
-                        "User {} is already logged in".format(name))
+                    self.sendResponse("error",
+                                      "User {} is already logged in".format(name))
                 elif self.users[name].password != password:
-                    self.sendLine("Invalid username/password".format(name))
+                    self.sendResponse(
+                        "error", "Invalid username/password".format(name))
                 else:
-                    self.state = "LOGGED_IN"
                     self.users[name].active = True
                     self.users[name].protocol = self
                     self.user = self.users[name]
-                    self.sendLine(
-                        "Login successful. Welcome to the chat room, {}!".format(name))
+                    self.sendResponse("login",
+                                      "Login successful. Welcome to the chat room, {}!".format(name))
             else:
                 self.users[name] = User(name, password)
-                self.sendLine(
-                    "Registering new user '{}'. Please login again to verify password".format(name))
+                self.sendResponse("error",
+                                  "Registering new user '{}'. Please login again to verify password".format(name))
 
     def logout(self, args):
-        if self.state == "LOGGED_OUT":
-            self.sendLine(
-                "Please login first with: !login <username> <password>")
+        if self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: !login <username> <password>")
         else:
             self.logoutUser()
-            self.sendLine(
-                "Log out successful. Goodbye, {}!")
+            self.sendResponse("close",
+                              "Log out successful. Goodbye, {}!")
 
     def createRoom(self, args):
-        if self.state == "LOGGED_OUT":
-            self.sendLine(
-                "Please login first with: !login <username> <password>")
+        if self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: !login <username> <password>")
         elif len(args) < 1:
-            self.sendLine("Need to enter a room name to create")
+            self.sendResponse("error", "Need to enter a room name to create")
         else:
             newRoom = args[0]
             if newRoom.lower().startswith("im"):
-                self.sendLine(
-                    "Sorry, rooms cannot start with 'IM' due to implementation details")
+                self.sendResponse("error",
+                                  "Sorry, rooms cannot start with 'IM' due to implementation details")
+            elif ("|" in newRoom) or (self.prefix in newRoom):
+                self.sendResponse("error",
+                                  "Sorry, rooms cannot contain the characters {} or {} due to implementation details".format("|", self.prefix))
             elif not newRoom in self.messageChains:
                 self.messageChains[newRoom] = MessageChain(newRoom)
-                self.sendLine(
-                    "Created new room '{}'!".format(newRoom))
+                self.sendResponse("create",
+                                  "Created new room '{}'!".format(newRoom))
             else:
-                self.sendLine(
-                    "Room '{}' already exists".format(newRoom))
+                self.sendResponse("error",
+                                  "Room '{}' already exists".format(newRoom))
 
     def joinRoom(self, args):
-        if self.state == "LOGGED_OUT":
-            self.sendLine(
-                "Please login first with: !login <username> <password>")
+        if not self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: !login <username> <password>")
         elif len(args) < 1:
-            self.sendLine("Need to enter a room name to join")
+            self.sendResponse("error", "Need to enter a room name to join")
         else:
             room = args[0]
-            if room.lower().startswith("im_"):
-                self.sendLine(
-                    "Use /im to look at IM messages with other users")
+            if room.lower().startswith("im"):
+                self.sendResponse("error",
+                                  "Use /im to look at IM messages with other users")
             elif room in self.messageChains:
-                self.removeUserFromRoom()
                 self.addUserToRoom(room)
-                self.state = "IN_ROOM"
-                self.sendLine(
-                    "Joined room '{}'!".format(room))
-                for msg in self.messageChains[room].getMessages(10):
-                    self.sendLine(m)
+                self.sendResponse("join",
+                                  "Joined room '{}'!".format(room))
+                for msg in self.messageChains[room].getFormattedMessages(10):
+                    self.sendResponse("msg", msg)
             else:
-                self.sendLine(
-                    "Cannot join unrecognized room '{}'".format(room))
+                self.sendResponse("error",
+                                  "Cannot join unrecognized room '{}'".format(room))
 
     def message(self, args):
-        if not (self.state == "IN_ROOM" or self.state == "IN_IM"):
-            self.sendLine("Need to be in a room or private im to message")
+        """Method to handle messages to one or more rooms. See sendIM for private messging
+
+        Takes list of string that should be formatted like < room1 > <room2 > ... < roomN > | message.
+        If properly formatted, will send the message contents to all rooms listed before the | divider
+
+            Args:
+                param1(List(str)): List of str arguments
+        """
+        targetRooms = []
+        i = 0
+        # Get list of rooms as initial terms, looking for | as divider
+        while i < len(args) and not args[i].strip().startswith("|"):
+            if not (args[i] in self.messageChains):
+                self.sendResponse(
+                    "error", "Cannot recognize room {} as parameter to a /msg call".format(args[i]))
+                return
+            # Check that user is in all rooms AND room is not an IM "room"
+            elif not (args[i] in self.user.rooms) or args[i].startswith("IM"):
+                self.sendResponse(
+                    "error", "You cannot send a message to room {} because you have not joined".format(args[i]))
+                return
+            else:
+                targetRooms.append(args[i])
+
+        # Get full message string including | divider
+        msg = " ".join(args[i:]).strip()
+        # remove | divider
+        msg = msg[1:].strip()
+        # Check for empty message
+        if len(msg) == 0:
+            self.sendResponse(
+                "error", "A message needs non-blank contents to be sent")
+        # Check for no rooms to target
+        elif len(targetRooms) == 0:
+            self.sendResponse("error"
+                              "Unsure of where to send message - try /join first")
         else:
-            msg = " ".join(args).strip()
-            if len(msg) == 0:
-                self.sendLine("A message needs non-blank contents to be sent")
-            elif self.user.room:
-                messageLoc = self.messageChains[self.user.room]
-                newMessage = Message(self.user.name, datetime.now(), msg)
+            currTime = datetime.now()
+            for target in targetRooms:
+                newMessage = Message(target, self.user.name, currTime, msg)
+                messageLoc = self.messageChains[target]
                 messageLoc.messages.append(newMessage)
                 for user in messageLoc.users:
-                    user.protocol.sendLine(newMessage.getFormatted())
-            else:
-                self.sendLine(
-                    "Unsure of where to send message - try /join or /im first")
+                    user.protocol.sendResponse(
+                        "msg", newMessage.getFormatted())
 
     def joinIM(self, args):
-        if self.state == "LOGGED_OUT":
-            self.sendLine(
-                "Please login first with: !login <username> <password>")
+        if not self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: !login <username> <password>")
         elif len(args) == 0:
-            self.sendLine(
-                "Need to add users to IM like /im <user1> <user2> ...")
+            self.sendResponse("error",
+                              "Need to add users to IM like /im <user1> <user2> ...")
         else:
             # Remove any duplicates
             users = list(dict.fromkeys(args))
@@ -191,43 +222,74 @@ class ChatServer(IRC):
             for user in users:
                 if not user in self.users:
                     allUsersExist = False
-                    self.sendLine(
-                        "Unable to IM unknown user '{}'".format(user))
+                    self.sendResponse("error",
+                                      "Unable to IM unknown user '{}'".format(user))
             if allUsersExist:
                 imName = "IM " + " ".join(users)
                 if not imName in self.messageChains:
                     self.messageChains[imName] = MessageChain(imName)
-                self.removeUserFromRoom()
                 self.addUserToRoom(imName)
-                self.state = "IN_IM"
-                self.sendLine(
-                    "Joined IMs between {}!".format(users))
+                self.sendResponse("im",
+                                  "Joined IMs between {}!".format(users))
                 for msg in self.messageChains[imName].getMessages(10):
-                    self.sendLine(msg.getFormatted())
+                    self.sendResponse("msg", msg.getFormatted())
+
+    """def sendIM(self, args):
+        targetUsers = []
+        let i = 0
+        # Get list of users, looking for | as divider
+        while i < len(args) and not args[i].strip().startswith("|"):
+            if not (args[i] in self.users):
+                self.sendResponse(
+                    "error", "Cannot recognize user {} as parameter to a /privmsg call".format(args[i]))
+                return;
+            else:
+                targetRooms.append(args[i])
+        # Get full message string including | divider
+        msg = " ".join(args[i:]).strip()
+        # remove | divider
+        msg = msg[1:].strip()
+        # Check for empty message
+        if len(msg) == 0:
+            self.sendResponse(
+                "error", "A message needs non-blank contents to be sent")
+        # Check for no rooms to target
+        elif len(targetUsers) == 0:
+            self.sendResponse("error"
+                                "Unsure of where to send message - try /join or /im first")
+        else:"""
 
     # Helper Methods
-    def removeUserFromRoom(self):
+    def userLoggedIn(self):
+        return self.user and self.user.active
+
+    def removeUserFromRoom(self, roomName):
         if self.user:
-            roomName = self.user.room
-            if roomName:
-                room = self.messageChains[roomName]
-                if room:
-                    room.removeUser(self.user)
-                self.user.room = None
+            room = self.messageChains[roomName]
+            if room:
+                room.removeUser(self.user)
+            self.user.room = None
 
     def addUserToRoom(self, roomName):
         if self.user:
-            if roomName and (roomName in self.messageChains):
+            if roomName and (roomName in self.messageChains and not (roomName in self.user.rooms)):
                 self.messageChains[roomName].addUser(self.user)
-                self.user.room = roomName
+                self.user.rooms.append(roomName)
 
     def logoutUser(self):
-        self.removeUserFromRoom()
-        self.state = "LOGGED_OUT"
         if self.user:
+            for room in self.user.rooms:
+                self.removeUserFromRoom()
             self.users[self.user.name].active = False
             self.users[self.user.name].protocol = None
             self.user = None
+
+    def sendResponse(self, command, params):
+        if params:
+            self.sendLine("{}{} {}".format(
+                self.prefix, command.lower(), params))
+        else:
+            self.sendLine("{}{}".format(self.prefix, command.lower()))
 
 
 class ChatServerFactory(Factory):
@@ -238,7 +300,7 @@ class ChatServerFactory(Factory):
 
     def buildProtocol(self, addr):
         print("Protocol built")
-        return ChatServer(self.users, self.messages)
+        return ChatServer("!", self.users, self.messages)
 
 
 # def main():

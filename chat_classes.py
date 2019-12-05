@@ -1,15 +1,9 @@
-CHAT_STATES = ["LOGGED_OUT",
-               "LOGGED_IN"
-               "IN_ROOM",
-               "IN_IM"]
-
-
 class User:
     def __init__(self, name, password):
         self.name = name
         self.password = password
         self.active = False
-        self.room = None
+        self.rooms = []
         self.protocol = None
 
 
@@ -45,10 +39,11 @@ class MessageChain:
 
 
 class Message:
-    def __init__(self, sender, time, text):
+    def __init__(self, location, sender, time, text):
+        self.location = location
         self.sender = sender
         self.time = time
         self.text = text
 
     def getFormatted(self):
-        return "[{}]<{}>: {}".format(self.time.strftime("%m/%d/%Y@%H:%M:%S"), self.sender, self.text)
+        return "[{}]({})<{}>: {}".format(self.location, self.time.strftime("%m/%d/%Y@%H:%M:%S"), self.sender, self.text)
