@@ -45,7 +45,7 @@ class ChatServer(IRC):
         (command, prefix, params) = self.parsemsg(data)
         userInfo = self.user.name if self.user else "logged out client"
         print("Content from {}: {} / {} / {}".format(userInfo,
-                                                     command, prefix, words[1:]))
+                                                     command, prefix, params))
         self.handleCommand(command, prefix, params)
 
     def handleCommand(self, command, prefix, params):
@@ -54,7 +54,7 @@ class ChatServer(IRC):
         elif prefix == self.prefix:
             if command == "open":
                 self.sendResponse(
-                    "open", "Welcome to the chat program! Use /login to get started")
+                    "open", "Welcome to the chat program! Use {}login to get started".format(self.prefix))
             elif command in ["close", "logout", "quit", "exit"]:
                 self.logout(params)
             elif command == "login":
@@ -63,6 +63,10 @@ class ChatServer(IRC):
                 self.createRoom(params)
             elif command == "join":
                 self.joinRoom(params)
+            elif command == "leave":
+                self.leaveRoom(params)
+            elif command == "list":
+                self.listInfo(params)
             elif command == "im":
                 self.joinIM(params)
             elif command in ["msg", "message"]:
@@ -78,13 +82,53 @@ class ChatServer(IRC):
     def unknownCommand(self, command):
         self.sendResponse("error", "Unrecognized command '{}'".format(command))
 
+    def listInfo(self, args):
+        if not self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
+        elif len(args) == 0:
+            self.sendResponse(
+                "error", "Listing requires at least one argument. Use {}list <users|rooms>, e.g.".format(self.prefix))
+        elif args[0].lower() == "rooms":
+            rooms = []
+            for room in self.messageChains.keys():
+                # dont include IM "room"s
+                if not room.startswith("IM"):
+                    rooms.append(room)
+            self.sendResponse(
+                "list", "These are available rooms: {}".format(rooms))
+        elif args[0].lower() == "users":
+            if len(args) == 1:
+                usersDict = {}
+                for username in self.users:
+                    usersDict[username] = self.users[username].active
+                self.sendResponse(
+                    "list", "These are registered users and their online status: {}".format(usersDict))
+            elif len(args) == 2:
+                targetRoom = args[1]
+                if targetRoom in self.messageChains and (not targetRoom.lower().startswith("im")):
+                    usersInRoom = []
+                    for user in self.messageChains[targetRoom].users:
+                        usersInRoom.append(user.name)
+                    self.sendResponse(
+                        "list", "These are users that have joined the room '{}': {}".format(targetRoom, usersInRoom))
+                else:
+                    self.sendResponse("error", "Cannot recognize {} as room to command {}list users <room>".format(
+                        targetRoom, self.prefix))
+            else:
+                self.sendResponse(
+                    "error", "Too many arguments for {}list users <room> command".format(self.prefix))
+        else:
+            self.sendResponse(
+                "error", "Invalid arguments for {}list command. Use {}list <users|rooms>, e.g.".format(self.prefix, self.prefix))
+
     def login(self, args):
         if self.userLoggedIn():
             self.sendResponse("error",
-                              "Already logged in - see /help for valid commands")
+                              "Already logged in - see {}help for valid commands".format(self.prefix))
         elif len(args) < 2:
             self.sendResponse("error",
-                              "Please enter a username and password, e.g. !login <username> <password>")
+                              "Please enter a username and password, e.g. {}login <username> <password>".format(self.prefix))
         else:
             name = args[0]
             password = args[1]
@@ -103,22 +147,22 @@ class ChatServer(IRC):
                                       "Login successful. Welcome to the chat room, {}!".format(name))
             else:
                 self.users[name] = User(name, password)
-                self.sendResponse("error",
+                self.sendResponse("create",
                                   "Registering new user '{}'. Please login again to verify password".format(name))
 
     def logout(self, args):
-        if self.userLoggedIn():
+        if not self.userLoggedIn():
             self.sendResponse("error",
-                              "Please login first with: !login <username> <password>")
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
         else:
             self.logoutUser()
             self.sendResponse("close",
                               "Log out successful. Goodbye, {}!")
 
     def createRoom(self, args):
-        if self.userLoggedIn():
+        if not self.userLoggedIn():
             self.sendResponse("error",
-                              "Please login first with: !login <username> <password>")
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
         elif len(args) < 1:
             self.sendResponse("error", "Need to enter a room name to create")
         else:
@@ -140,14 +184,14 @@ class ChatServer(IRC):
     def joinRoom(self, args):
         if not self.userLoggedIn():
             self.sendResponse("error",
-                              "Please login first with: !login <username> <password>")
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
         elif len(args) < 1:
             self.sendResponse("error", "Need to enter a room name to join")
         else:
             room = args[0]
             if room.lower().startswith("im"):
                 self.sendResponse("error",
-                                  "Use /im to look at IM messages with other users")
+                                  "Use {}im to look at IM messages with other users".format(self.prefix))
             elif room in self.messageChains:
                 self.addUserToRoom(room)
                 self.sendResponse("join",
@@ -157,6 +201,28 @@ class ChatServer(IRC):
             else:
                 self.sendResponse("error",
                                   "Cannot join unrecognized room '{}'".format(room))
+
+    def leaveRoom(self, args):
+        if not self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
+        elif len(args) < 1:
+            self.sendResponse(
+                "error", "Need to enter at least one room name to leave")
+        else:
+            # check rooms for existance, if it is an IM "room", or if user is not in room. Send error accordingly
+            for room in args:
+                if (not room in self.messageChains) or room.lower().startswith("im"):
+                    self.sendResponse(
+                        "error", "Cannot recognize room '{}' to leave".format(room))
+                    return
+                elif not room in self.user.rooms:
+                    self.sendResponse(
+                        "error", "Not currently in room '{}'.".format(room))
+            for room in args:
+                self.removeUserFromRoom(room)
+                self.sendResponse("leave",
+                                  "Left room '{}'!".format(room))
 
     def message(self, args):
         """Method to handle messages to one or more rooms. See sendIM for private messging
@@ -171,17 +237,19 @@ class ChatServer(IRC):
         i = 0
         # Get list of rooms as initial terms, looking for | as divider
         while i < len(args) and not args[i].strip().startswith("|"):
+            print("Loop: {}".format(args[i]))
             if not (args[i] in self.messageChains):
                 self.sendResponse(
-                    "error", "Cannot recognize room {} as parameter to a /msg call".format(args[i]))
+                    "error", "Cannot recognize room {} as parameter to a {}msg call".format(args[i], self.prefix))
                 return
             # Check that user is in all rooms AND room is not an IM "room"
-            elif not (args[i] in self.user.rooms) or args[i].startswith("IM"):
+            elif not (args[i] in self.user.rooms) or args[i].lower().startswith("im"):
                 self.sendResponse(
                     "error", "You cannot send a message to room {} because you have not joined".format(args[i]))
                 return
             else:
                 targetRooms.append(args[i])
+                i = i+1
 
         # Get full message string including | divider
         msg = " ".join(args[i:]).strip()
@@ -194,8 +262,10 @@ class ChatServer(IRC):
         # Check for no rooms to target
         elif len(targetRooms) == 0:
             self.sendResponse("error"
-                              "Unsure of where to send message - try /join first")
+                              "Unsure of where to send message - try {}join first".format(self.prefix))
         else:
+            print("here")
+            print(msg)
             currTime = datetime.now()
             for target in targetRooms:
                 newMessage = Message(target, self.user.name, currTime, msg)
@@ -208,10 +278,10 @@ class ChatServer(IRC):
     def joinIM(self, args):
         if not self.userLoggedIn():
             self.sendResponse("error",
-                              "Please login first with: !login <username> <password>")
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
         elif len(args) == 0:
             self.sendResponse("error",
-                              "Need to add users to IM like /im <user1> <user2> ...")
+                              "Need to add users to IM like {}im <user1> <user2> ...".format(self.prefix))
         else:
             # Remove any duplicates
             users = list(dict.fromkeys(args))
@@ -241,7 +311,7 @@ class ChatServer(IRC):
         while i < len(args) and not args[i].strip().startswith("|"):
             if not (args[i] in self.users):
                 self.sendResponse(
-                    "error", "Cannot recognize user {} as parameter to a /privmsg call".format(args[i]))
+                    "error", "Cannot recognize user {} as parameter to a {}privmsg call".format(args[i], self.prefix))
                 return;
             else:
                 targetRooms.append(args[i])
@@ -256,7 +326,7 @@ class ChatServer(IRC):
         # Check for no rooms to target
         elif len(targetUsers) == 0:
             self.sendResponse("error"
-                                "Unsure of where to send message - try /join or /im first")
+                                "Unsure of where to send message - try {}join or {}im first".format(self.prefix, self.prefix))
         else:"""
 
     # Helper Methods
@@ -279,7 +349,7 @@ class ChatServer(IRC):
     def logoutUser(self):
         if self.user:
             for room in self.user.rooms:
-                self.removeUserFromRoom()
+                self.removeUserFromRoom(room)
             self.users[self.user.name].active = False
             self.users[self.user.name].protocol = None
             self.user = None

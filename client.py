@@ -29,7 +29,8 @@ class ChatClient(irc.IRCClient):
         # Check prefix matches server
         if command == "open" and prefix == "":
             self.prefix = data[0]
-            self.sendLine("{}open Retying prefix".format(self.prefix))
+            self.sendLine("{}open Retying prefix {}".format(
+                self.prefix, self.prefix))
         else:
             self._printMessage(data)
             if not self.readingInput:
@@ -43,7 +44,6 @@ class ChatClient(irc.IRCClient):
         prefix = self.prefix if input[0] == self.prefix else ""
         words = input.split()
         command = words[0].replace(prefix, "").lower()
-        print("Parse: {} / {} / {}".format(command, prefix, words[1:]))
         return (command, prefix, words[1:])
 
     def _pollInput(self):
