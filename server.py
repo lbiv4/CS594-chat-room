@@ -39,8 +39,8 @@ class ChatServer(IRC):
         """
         Parses input into three parts - a prefix, a command, and a list of words
         """
-        if not input:
-            return("", "unknown")
+        if not input or input.strip() == "":
+            return("", "unknown", input)
         prefix = self.prefix if input[0] == self.prefix else ""
         words = input.split()
         command = words[0].replace(prefix, "").lower()
@@ -299,7 +299,7 @@ class ChatServer(IRC):
                     self.sendResponse(
                         "error", "Cannot recognize room '{}' to leave".format(room))
                     return
-                elif not room in self.user.rooms:
+                elif not (room in self.user.rooms):
                     self.sendResponse(
                         "error", "Not currently in room '{}'.".format(room))
             for room in args:
@@ -324,7 +324,6 @@ class ChatServer(IRC):
         i = 0
         # Get list of rooms as initial terms, looking for | as divider
         while i < len(args) and not args[i].strip().startswith("|"):
-            print("Loop: {}".format(args[i]))
             if not (args[i] in self.messageChains):
                 self.sendResponse(
                     "error", "Cannot recognize room {} as parameter to a {}msg call".format(args[i], self.prefix))
@@ -452,6 +451,11 @@ class ChatServer(IRC):
                 room.removeUser(self.user)
                 self.user.rooms.remove(roomName)
 
+    def removeUserFromAllRooms(self):
+        rooms = list(dict.fromkeys(self.user.rooms))
+        for i in rooms:
+            self.removeUserFromRoom(i)
+
     def addUserToRoom(self, roomName):
         """
         Helper method to add a user to a rooom if they had not previously joined that room
@@ -466,8 +470,7 @@ class ChatServer(IRC):
         Helper method to handle logout and prepare for client disconnection by removing a user from all rooms and disassociating from a protocol
         """
         if self.user:
-            for room in self.user.rooms:
-                self.removeUserFromRoom(room)
+            self.removeUserFromAllRooms()
             self.users[self.user.name].active = False
             self.users[self.user.name].protocol = None
             self.user = None
