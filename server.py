@@ -34,6 +34,9 @@ class ChatServer(IRC):
         self.sendResponse("close", "Confirming close, goodbye!")
 
     def parsemsg(self, input):
+        """
+        Parses input into three parts - a prefix, a command, and a list of words
+        """
         if not input:
             return("", "unknown")
         prefix = self.prefix if input[0] == self.prefix else ""
@@ -49,6 +52,13 @@ class ChatServer(IRC):
         self.handleCommand(command, prefix, params)
 
     def handleCommand(self, command, prefix, params):
+        """ Takes results of parsed message and hands control flow off to different command handlers accordingly
+
+        Args:
+            command(str): command that should be handled
+            prefix(str): character indicating intent for a command from client
+            params(List(str)): List of strings that get passed to handlers to process according to individual flows
+        """
         if not command:
             self.unknownCommand("")
         elif prefix == self.prefix:
@@ -67,10 +77,12 @@ class ChatServer(IRC):
                 self.leaveRoom(params)
             elif command == "list":
                 self.listInfo(params)
-            elif command == "im":
-                self.joinIM(params)
             elif command in ["msg", "message"]:
                 self.message(params)
+            elif command == "im":
+                self.joinIM(params)
+            elif command == "privmsg":
+                self.sendIM(params)
             else:
                 self.unknownCommand(command)
         else:
@@ -83,6 +95,22 @@ class ChatServer(IRC):
         self.sendResponse("error", "Unrecognized command '{}'".format(command))
 
     def listInfo(self, args):
+        """
+        Handler for list command. Looks for input formatted like one of the following
+            !list users
+            !list rooms
+            !list users <room>
+
+        Args:
+                args(List(str)): List of str arguments
+
+        Return:
+            Outputs response to client based on following commands:
+                !list users: Returns list command with message providing all users and their online status
+                !list rooms: Returns list command with message providing all rooms
+                !list users <room>: If <room> is a valid room, returns list command with message providing all users who have joined that room
+                else: Appropriate error response
+        """
         if not self.userLoggedIn():
             self.sendResponse("error",
                               "Please login first with: {}login <username> <password>".format(self.prefix))
@@ -107,6 +135,10 @@ class ChatServer(IRC):
             elif len(args) == 2:
                 targetRoom = args[1]
                 if targetRoom in self.messageChains and (not targetRoom.lower().startswith("im")):
+                    if not targetRoom in self.user.rooms:
+                        self.sendResponse(
+                            "error", "Please join room {} before attempting to view users")
+                        return
                     usersInRoom = []
                     for user in self.messageChains[targetRoom].users:
                         usersInRoom.append(user.name)
@@ -123,6 +155,18 @@ class ChatServer(IRC):
                 "error", "Invalid arguments for {}list command. Use {}list <users|rooms>, e.g.".format(self.prefix, self.prefix))
 
     def login(self, args):
+        """
+        Handler for login command. Looks for input formatted like `!login <username> <password>`. Creates the user with the provided name/password
+        if the username is not stored on the server, logs the user in if username exists and the password matches
+
+        Args:
+                args(List(str)): List of str arguments.
+                arg[0](str): username
+                arg[1](str):password
+
+        Return:
+            Outputs create command upon registering a username/password combo, login command upon subsequent username/password match, error command otherwise
+        """
         if self.userLoggedIn():
             self.sendResponse("error",
                               "Already logged in - see {}help for valid commands".format(self.prefix))
@@ -151,15 +195,30 @@ class ChatServer(IRC):
                                   "Registering new user '{}'. Please login again to verify password".format(name))
 
     def logout(self, args):
-        if not self.userLoggedIn():
-            self.sendResponse("error",
-                              "Please login first with: {}login <username> <password>".format(self.prefix))
-        else:
-            self.logoutUser()
-            self.sendResponse("close",
-                              "Log out successful. Goodbye, {}!")
+        """
+        Handler for logout command. Looks for input formatted like `!logout`.
+
+        Args:
+                args(List(str)): List of str arguments. Does not matter for this command
+
+        Return:
+            Outputs close command
+        """
+        self.logoutUser()
+        self.sendResponse("close",
+                          "Log out successful. Goodbye!")
 
     def createRoom(self, args):
+        """
+        Handler for create command to create a room. Looks for input formatted like `!create <roomname>` where the room name cannot
+        contain the prefix, | character, or start with "im" due to other implementation details
+
+        Args:
+                args(List(str)): List of str arguments. Should contain a single value corresponding to a room name
+
+        Return:
+            Outputs create command upon registering a new room, error command otherwise
+        """
         if not self.userLoggedIn():
             self.sendResponse("error",
                               "Please login first with: {}login <username> <password>".format(self.prefix))
@@ -182,6 +241,15 @@ class ChatServer(IRC):
                                   "Room '{}' already exists".format(newRoom))
 
     def joinRoom(self, args):
+        """
+        Handler for join command to join a room. Looks for input formatted like `!join <roomname>` where the room name corresponds to a created room
+
+        Args:
+                args(List(str)): List of str arguments. Should contain a single value corresponding to a room name
+
+        Return:
+            Outputs join command upon joining an existing room that the user was not previously in, error otherwise
+        """
         if not self.userLoggedIn():
             self.sendResponse("error",
                               "Please login first with: {}login <username> <password>".format(self.prefix))
@@ -193,16 +261,29 @@ class ChatServer(IRC):
                 self.sendResponse("error",
                                   "Use {}im to look at IM messages with other users".format(self.prefix))
             elif room in self.messageChains:
-                self.addUserToRoom(room)
-                self.sendResponse("join",
-                                  "Joined room '{}'!".format(room))
-                for msg in self.messageChains[room].getFormattedMessages(10):
-                    self.sendResponse("msg", msg)
+                if not (room in self.user.rooms):
+                    self.addUserToRoom(room)
+                    self.sendResponse("join",
+                                      "Joined room '{}'!".format(room))
+                    for msg in self.messageChains[room].getFormattedMessages(10):
+                        self.sendResponse("msg", msg)
+                else:
+                    self.sendResponse(
+                        "error", "Already joined room '{}'".format(room))
             else:
                 self.sendResponse("error",
                                   "Cannot join unrecognized room '{}'".format(room))
 
     def leaveRoom(self, args):
+        """
+        Handler for leave command to leave a room. Looks for input formatted like `!leave <roomname>` where the room name corresponds to a room the user has joined
+
+        Args:
+                args(List(str)): List of str arguments. Should contain a single value corresponding to a room name
+
+        Return:
+            Outputs leave command upon joining a room that the user had previously joined, error command otherwise
+        """
         if not self.userLoggedIn():
             self.sendResponse("error",
                               "Please login first with: {}login <username> <password>".format(self.prefix))
@@ -227,12 +308,16 @@ class ChatServer(IRC):
     def message(self, args):
         """Method to handle messages to one or more rooms. See sendIM for private messging
 
-        Takes list of string that should be formatted like < room1 > <room2 > ... < roomN > | message.
-        If properly formatted, will send the message contents to all rooms listed before the | divider
+        Takes list of string that should be formatted like `< room1 > <room2 > ... < roomN > | message`.
+        If properly formatted, will send the message contents to all rooms listed before the `|` divider
 
             Args:
-                param1(List(str)): List of str arguments
+                args(List(str)): List of str arguments
         """
+        if not self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
+            return
         targetRooms = []
         i = 0
         # Get list of rooms as initial terms, looking for | as divider
@@ -264,8 +349,6 @@ class ChatServer(IRC):
             self.sendResponse("error"
                               "Unsure of where to send message - try {}join first".format(self.prefix))
         else:
-            print("here")
-            print(msg)
             currTime = datetime.now()
             for target in targetRooms:
                 newMessage = Message(target, self.user.name, currTime, msg)
@@ -304,17 +387,25 @@ class ChatServer(IRC):
                 for msg in self.messageChains[imName].getMessages(10):
                     self.sendResponse("msg", msg.getFormatted())
 
-    """def sendIM(self, args):
+    def sendIM(self, args):
+        if not self.userLoggedIn():
+            self.sendResponse("error",
+                              "Please login first with: {}login <username> <password>".format(self.prefix))
+            return
         targetUsers = []
-        let i = 0
+        i = 0
         # Get list of users, looking for | as divider
         while i < len(args) and not args[i].strip().startswith("|"):
             if not (args[i] in self.users):
                 self.sendResponse(
                     "error", "Cannot recognize user {} as parameter to a {}privmsg call".format(args[i], self.prefix))
-                return;
+                return
             else:
-                targetRooms.append(args[i])
+                targetUsers.append(args[i])
+                i = i+1
+        # Add user if not included
+        if not self.user.name in targetUsers:
+            targetUsers.append(self.user.name)
         # Get full message string including | divider
         msg = " ".join(args[i:]).strip()
         # remove | divider
@@ -323,30 +414,55 @@ class ChatServer(IRC):
         if len(msg) == 0:
             self.sendResponse(
                 "error", "A message needs non-blank contents to be sent")
-        # Check for no rooms to target
-        elif len(targetUsers) == 0:
-            self.sendResponse("error"
-                                "Unsure of where to send message - try {}join or {}im first".format(self.prefix, self.prefix))
-        else:"""
+        # Check for no users or just sending user
+        elif len(targetUsers) <= 1:
+            self.sendResponse("error",
+                              "Unsure of who to send private massage - make sure there is one user beside yourself listed".format(self.prefix, self.prefix))
+        else:
+            targetUsers.sort()
+            imName = "IM {}".format(" ".join(targetUsers))
+            newMessage = Message(imName, self.user.name, datetime.now(), msg)
+            if self.messageChains.has_key(imName):
+                messageLoc = self.messageChains[imName]
+                messageLoc.messages.append(newMessage)
+                for user in messageLoc.users:
+                    user.protocol.sendResponse(
+                        "msg", newMessage.getFormatted())
+            else:
+                self.sendResponse("error", "Please start an IM chain first with {}im {}".format(
+                    self.prefix, " ".join(targetUsers)))
 
     # Helper Methods
+
     def userLoggedIn(self):
+        """
+        Helper method to check if a user has sent a `login` command and logged in
+        """
         return self.user and self.user.active
 
     def removeUserFromRoom(self, roomName):
+        """
+        Helper method to remove a user from a rooom if they had joined that room
+        """
         if self.user:
             room = self.messageChains[roomName]
-            if room:
+            if room and (roomName in self.user.rooms):
                 room.removeUser(self.user)
-            self.user.room = None
+                self.user.rooms.remove(roomName)
 
     def addUserToRoom(self, roomName):
+        """
+        Helper method to add a user to a rooom if they had not previously joined that room
+        """
         if self.user:
             if roomName and (roomName in self.messageChains and not (roomName in self.user.rooms)):
                 self.messageChains[roomName].addUser(self.user)
                 self.user.rooms.append(roomName)
 
     def logoutUser(self):
+        """
+        Helper method to handle logout and prepare for client disconnection by removing a user from all rooms and disassociating from a protocol
+        """
         if self.user:
             for room in self.user.rooms:
                 self.removeUserFromRoom(room)
@@ -355,6 +471,9 @@ class ChatServer(IRC):
             self.user = None
 
     def sendResponse(self, command, params):
+        """
+        Helper method for formatting a command amd its associated message
+        """
         if params:
             self.sendLine("{}{} {}".format(
                 self.prefix, command.lower(), params))
@@ -375,5 +494,6 @@ class ChatServerFactory(Factory):
 
 # def main():
 if __name__ == '__main__':
+    print("Starting server")
     reactor.listenTCP(8000, ChatServerFactory())
     reactor.run()

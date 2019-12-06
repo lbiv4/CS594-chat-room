@@ -31,6 +31,9 @@ class ChatClient(irc.IRCClient):
             self.prefix = data[0]
             self.sendLine("{}open Retying prefix {}".format(
                 self.prefix, self.prefix))
+        elif command == "close":
+            self._printMessage(data)
+            self.transport.loseConnection()
         else:
             self._printMessage(data)
             if not self.readingInput:
