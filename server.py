@@ -1,21 +1,23 @@
-"""https://twisted.readthedocs.io/en/twisted-17.9.0/core/howto/servers.html"""
-"""https://twistedmatrix.com/documents/current/api/twisted.words.protocols.irc.IRC.html#handleCommand
-https://buildmedia.readthedocs.org/media/pdf/twisted/latest/twisted.pdf
-https://twistedmatrix.com/documents/13.1.0/core/howto/clients.html
-https://twistedmatrix.com/documents/current/api/twisted.protocols.basic.LineReceiver.html
-
-"""
-
-
-
-
 from twisted.internet import reactor, protocol
 from twisted.words.protocols.irc import IRC
 from twisted.internet.protocol import Factory
 import threading
+import sys
+import re
 from datetime import datetime
 from chat_classes import *
+
+
 class ChatServer(IRC):
+    """
+    This class exists as a protocol for a chat server to handle connections with multiple instances of the chat client in client.py
+
+    This code leverages code from Twisted Python and was inspired from the following skeleton examples and documentation:
+        https://twisted.readthedocs.io/en/twisted-17.9.0/core/howto/servers.html
+        https://twistedmatrix.com/documents/current/api/twisted.words.protocols.irc.IRC.html
+    However, the vast major of this code is specific to this project and doesn't follow the IRC protocol methods that closely. 
+    """
+
     def __init__(self, expectedPrefix, users, messageChains):
         self.prefix = expectedPrefix
         self.users = users
@@ -474,26 +476,38 @@ class ChatServer(IRC):
         """
         Helper method for formatting a command amd its associated message
         """
+        userInfo = self.user.name if self.user else "logged out client"
         if params:
-            self.sendLine("{}{} {}".format(
-                self.prefix, command.lower(), params))
+            output = "{}{} {}".format(
+                self.prefix, command.lower(), params)
+            self.sendLine(output)
+            print("Response to {}: {}".format(userInfo, output))
         else:
-            self.sendLine("{}{}".format(self.prefix, command.lower()))
+            output = "{}{}".format(self.prefix, command.lower())
+            self.sendLine(output)
+            print("Response to {}: {}".format(userInfo, output))
 
 
 class ChatServerFactory(Factory):
+    """
+    A factory class that takes the ChatSever protocol and holds state/listens to connection.
+    """
 
-    def __init__(self):
+    def __init__(self, prefix):
+        self.prefix = prefix
         self.users = {}
         self.messages = {}
 
     def buildProtocol(self, addr):
         print("Protocol built")
-        return ChatServer("!", self.users, self.messages)
+        return ChatServer(self.prefix, self.users, self.messages)
 
 
-# def main():
 if __name__ == '__main__':
     print("Starting server")
-    reactor.listenTCP(8000, ChatServerFactory())
+    prefix = "!"
+    for arg in sys.argv:
+        if re.search("^--prefix=.$", arg):
+            prefix = arg[-1]
+    reactor.listenTCP(8000, ChatServerFactory(prefix))
     reactor.run()
